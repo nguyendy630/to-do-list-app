@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  # Run the pipeline for both direct pushes and pull requests.
+  push:
+  pull_request:
+
+jobs:
+  # Validate that the backend dependency tree installs cleanly.
+  backend:
+    name: Backend install check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --no-audit --no-fund
+
+  # Validate that the frontend dependency tree installs cleanly.
+  frontend:
+    name: Frontend install check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+  # Run lightweight build checks for both apps.
+  build:
+    name: Build validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Check backend syntax
+        working-directory: backend
+        run: node --check app.js
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend web bundle
+        working-directory: frontend
+        run: npx expo export --platform web
