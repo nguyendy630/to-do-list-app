@@ -3,6 +3,9 @@
 # Claude Generated Files
 .claude/
 
+# Data files
+backend/data
+
 # dependencies
 node_modules/
 

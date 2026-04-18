@@ -13,6 +13,7 @@ import {
   ScrollView,
   Modal,
   Platform,
+  NativeModules,
 } from 'react-native';
 
 import {
@@ -22,7 +23,28 @@ import {
 } from '@expo-google-fonts/funnel-sans';
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────────
-const BACKEND_URL = 'http://localhost:3001'
+const normalizeBaseUrl = (url) => (url || '').replace(/\/+$/, '');
+
+const resolveBackendBaseUrl = () => {
+  const envUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL);
+  if (envUrl) return envUrl;
+
+  if (Platform.OS === 'web') return 'http://localhost:3001';
+
+  const scriptURL = NativeModules?.SourceCode?.scriptURL;
+  if (scriptURL) {
+    try {
+      const parsed = new URL(scriptURL);
+      if (parsed.hostname) {
+        return `http://${parsed.hostname}:3001`;
+      }
+    } catch (e) {
+      // Ignore URL parsing issues and use localhost fallback.
+    }
+  }
+
+  return 'http://localhost:3001';
+};
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
 const PRIORITIES = ['low', 'medium', 'high'];
@@ -53,8 +75,11 @@ const blankForm = () => ({
 
 // ─── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
+  const [backendBaseUrl] = useState(() => resolveBackendBaseUrl());
+  const apiBaseUrl = `${backendBaseUrl}/api`;
   const [todos, setTodos] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [connectionOk, setConnectionOk] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTodo, setEditingTodo] = useState(null); // null = adding new
   const [form, setForm] = useState(blankForm());
@@ -80,10 +105,13 @@ export default function App() {
 
   const fetchAll = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/`);
+      const res = await fetch(`${apiBaseUrl}/`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTodos(data);
+      setConnectionOk(true);
     } catch (e) {
+      setConnectionOk(false);
       Alert.alert('Error', 'Could not reach the server. Is it running on port 3001?');
     } finally {
       setIsLoading(false);
@@ -93,7 +121,7 @@ export default function App() {
   // ── API: POST /api/ ── create item
   const createTodo = async (item) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/`, {
+      const res = await fetch(`${apiBaseUrl}/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item),
@@ -109,7 +137,7 @@ export default function App() {
   // ── API: PUT /api/:id ── update item
   const updateTodo = async (id, updates) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/${id}`, {
+      const res = await fetch(`${apiBaseUrl}/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -125,7 +153,7 @@ export default function App() {
   // ── API: DELETE /api/:id ── delete item
   const deleteTodo = async (id) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${apiBaseUrl}/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.status === 'DELETE ITEM SUCCESSFUL') await fetchAll();
       else Alert.alert('Error', 'Server rejected the delete request.');
@@ -141,7 +169,7 @@ export default function App() {
       {
         text: 'Delete All', style: 'destructive', onPress: async () => {
           try {
-            const res = await fetch(`${BACKEND_URL}/api/`, { method: 'DELETE' });
+            const res = await fetch(`${apiBaseUrl}/`, { method: 'DELETE' });
             const data = await res.json();
             if (data.status === 'DELETE COLLECTION SUCCESSFUL') await fetchAll();
           } catch (e) {
@@ -155,7 +183,7 @@ export default function App() {
   // ── API: PUT /api/ ── replace entire collection
   const replaceCollection = async (newCollection) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/`, {
+      const res = await fetch(`${apiBaseUrl}/`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newCollection),
@@ -170,7 +198,7 @@ export default function App() {
   // ── API: GET /api/:id ── view single item (used in detail modal)
   const viewDetail = async (id) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/${id}`);
+      const res = await fetch(`${apiBaseUrl}/${id}`);
       const data = await res.json();
       setDetailTodo(data);
       setDetailVisible(true);
@@ -238,6 +266,11 @@ export default function App() {
         <View>
           <Text style={styles.appName}>Tasks</Text>
           <Text style={styles.appSubtitle}>{todos.length} tasks, {completedCount} done</Text>
+        </View>
+        <View style={[styles.connectionBadge, connectionOk ? styles.connectionBadgeOk : styles.connectionBadgeDown]}>
+          <Text style={[styles.connectionBadgeText, connectionOk ? styles.connectionBadgeTextOk : styles.connectionBadgeTextDown]}>
+            {connectionOk ? 'Connected' : 'Offline'}
+          </Text>
         </View>
       </View>
 
@@ -430,8 +463,8 @@ export default function App() {
                 <DetailRow label="Category" value={detailTodo.category} />
                 <DetailRow label="Due Date" value={detailTodo.due_date} />
                 <DetailRow label="Status" value={detailTodo.completed ? '✅ Completed' : '⏳ Pending'} />
-                <TouchableOpacity style={[styles.modalSaveBtn, { marginTop: 20 }]} onPress={() => setDetailVisible(false)}>
-                  <Text style={styles.modalSaveText}>Close</Text>
+                <TouchableOpacity style={styles.detailCloseBtn} onPress={() => setDetailVisible(false)}>
+                  <Text style={styles.detailCloseText}>Close</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -472,6 +505,23 @@ const styles = StyleSheet.create({
   },
   appName: { fontSize: 26, fontWeight: '700', color: '#111', letterSpacing: -0.5 },
   appSubtitle: { fontSize: 12, color: '#aaa', marginTop: 1 },
+  connectionBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  connectionBadgeOk: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#86efac',
+  },
+  connectionBadgeDown: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fca5a5',
+  },
+  connectionBadgeText: { fontSize: 11, fontWeight: '700' },
+  connectionBadgeTextOk: { color: '#166534' },
+  connectionBadgeTextDown: { color: '#991b1b' },
   statsRow: { flexDirection: 'row', gap: 8 },
   statBadge: {
     backgroundColor: '#f5f5f4',
@@ -664,5 +714,19 @@ const styles = StyleSheet.create({
   detailLabel: { fontSize: 13, color: '#aaa', fontWeight: '500' },
   detailValue: { fontSize: 13, color: '#111', fontWeight: '600' },
   detailTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
+  detailCloseBtn: {
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f4',
+    borderWidth: 1,
+    borderColor: '#e7e5e4',
+    alignItems: 'center',
+  },
+  detailCloseText: {
+    color: '#111',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   detailRow: {},
 });
